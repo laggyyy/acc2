@@ -16,7 +16,7 @@ import wget
 import heroku3
 client=amino.Client()
 def sigg(data):
-        key='7ad5b9cf-7c8c-4ff5-a016-6186e636d3b7'
+        key='fbf98eb3a07a9042ee5593b10ce9f3286a69d4e2'
         mac = hmac.new(bytes.fromhex(key), data.encode("utf-8"), sha1)
         digest = bytes.fromhex("32") + mac.digest()
         return base64.b64encode(digest).decode("utf-8")
