@@ -1,5 +1,6 @@
 import amino
 import os
+import names
 import json
 import threading
 import requests
@@ -27,6 +28,7 @@ def codee(link):
 
 for i in range(3):
   dev=client.devicee()
+  nick=names.get_full_name()
   #dev=client.device_id
   email=client.gen_email()
   print(email)
@@ -37,7 +39,7 @@ for i in range(3):
   
   
   try:
-    client.register(email = email,password = password,nickname =nickname, verificationCode = code,deviceId=dev)
+    client.register(email = email,password = password,nickname =nick, verificationCode = code,deviceId=dev)
     #sub.send_message(chatId=chatId,message="Criada")
     d={}
     d["email"]=str(email)
